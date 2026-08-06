@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ## Project Structure:
 
 review-trust-system/
@@ -39,3 +40,7 @@ app/
 
 .env
 pyproject.toml
+=======
+# review-trust-system
+AI - Powered System to Analyze and Recommend Businesses based on Reviews
+>>>>>>> d84ac00136ea7c7ee62d795bf4ae46d543b84734
