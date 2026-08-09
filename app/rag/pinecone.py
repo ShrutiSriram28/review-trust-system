@@ -43,21 +43,23 @@ def insert_review_vectors(reviews: list[dict]) -> None:
     
     index.upsert(vectors = vectors)
 
-def retrieve_relevant_reviews(description: str, business_ids: list[int], top_k: int = 20) -> list[dict]:
+def retrieve_relevant_reviews(description: str, business_ids: list[int], top_k_per_business: int = 5) -> list[dict]:
     if not description or not business_ids:
         return []
     
     query_embedding = embedding_model.embed_query(description)
-    result = index.query(
-        vector=query_embedding,
-        top_k=top_k,
-        include_metadata=True,
-        filter={
-            "business_id": {
-                "$in": business_ids,
-            }
-        },
-    )
+
+    for business_id in business_ids:
+        result = index.query(
+            vector=query_embedding,
+            top_k=top_k_per_business,
+            include_metadata=True,
+            filter={
+                "business_id": {
+                    "$in": business_ids,
+                }
+            },
+        )
 
     return [
         {
@@ -66,7 +68,7 @@ def retrieve_relevant_reviews(description: str, business_ids: list[int], top_k: 
             "review": match.metadata["review"],
             "rating": float(match.metadata["rating"]),
             "published_at": match.metadata["published_at"],
-            "similarity": match.score,
+            "similarity": float(match.score),
         }
         for match in result.matches
     ]

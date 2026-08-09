@@ -15,8 +15,9 @@ class RecommendationRequest(BaseModel):
     facility_type: str = Field(min_length=1)
     location: str = Field(min_length=1)
     description: str | None = None
-    top_k: int = Field(default=5, ge=1, le=10)
-
+    top_k: int = Field(default=5, ge=1)
+    business_limit: int = Field(default=5, ge=1)
+    review_limit: int = Field(default=5, ge=1)
 
 @app.get("/api/health")
 def health() -> dict:
@@ -25,11 +26,18 @@ def health() -> dict:
 @app.post("/api/recommendations")
 def get_recommendations(request: RecommendationRequest) -> dict:
     try:
+        if request.top_k > request.business_limit:
+            raise ValueError(
+                "top_k cannot exceed business_limit"
+            )
+        
         results = coordinator.recommend(
             facility_type=request.facility_type,
             location=request.location,
             description=request.description,
             top_k=request.top_k,
+            business_limit=request.business_limit,
+            review_limit=request.review_limit
         )
 
         return {

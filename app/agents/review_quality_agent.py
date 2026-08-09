@@ -18,6 +18,8 @@ class ReviewQualityResult(BaseModel):
     clarity: float = Field(ge = 0, le = 1)
     aspects: list[str]
     reason: str
+    preference_relevance: float = Field(ge=0, le=1)
+    preference_alignment: float = Field(ge=-1, le=1)
 
 class ReviewQualityAgent:
     # def __init__(self, model_name: str = "qwen3:8b") -> None:
@@ -37,13 +39,18 @@ class ReviewQualityAgent:
 
         self.structured_model = model.with_structured_output(ReviewQualityResult)
 
-    def evaluate(self, review: str, facility_type: str) -> ReviewQualityResult:
+    def evaluate(self, review: str, facility_type: str, user_preference: str | None = None) -> ReviewQualityResult:
+        preference_text = user_preference or "No user preference provided."
         prompt = f"""
-You are evaluating the information quality of a customer review.
+You are evaluating a customer review for two separate purposes:
+1. General review quality
+2. Alignment with user's stated preference
 
 Facility type: {facility_type}
 Review: {review}
+User preference: {preference_text}
 
+General Review Quality:
 Score each field from 0 to 1.
 
 specificity:
@@ -59,23 +66,38 @@ Is the review relevant to the facility being reviewed?
 clarity:
 Is the review understandable and internally coherent?
 
-Also return:
-
 aspects:
 A list of concrete topics mentioned in the review.
 
 reason:
-A brief explanation of the assigned scores.
+A brief explanation of the assigned general quality scores.
 
-You must return every required field:
-specificity, experience, relevance, clarity, aspects, and reason.
+User preference evaluation: 
+preference_relevance:
+A number from 0 to 1 describing how directly this review addresses what the user asked.
+
+preference_alignment:
+A number from -1 to 1.
+
++1 means the review clearly SUPPORTS the user's preference.
+0 means the review is neutral, irrelevant, or genuinely mixed. 
+-1 means the review clearly CONTRADICTS the user's preference.
+
+You MUST account for negation and polarity.
+
+If no user preference is provided:
+preference_relevance = 0
+preference_alignment = 0
+
+Do not treat the review and preference as similar just because the discuss the same topic
+
+You must return every required field.
 
 Do not omit any field.
-All four scores must be numeric values between 0 and 1.
 """
         return self.structured_model.invoke(prompt)
     
-def evaluate_business_reviews(reviews: list[dict], facility_type: str, agent: ReviewQualityAgent) -> dict:
+def evaluate_business_reviews(reviews: list[dict], facility_type: str, agent: ReviewQualityAgent, user_preference: str | None = None) -> dict:
     review_texts = [review["review"] for review in reviews]
     independence_scores = calculate_independence_scores(review_texts)
     scored_reviews = []
@@ -84,6 +106,7 @@ def evaluate_business_reviews(reviews: list[dict], facility_type: str, agent: Re
         quality_result = agent.evaluate(
             review = review["review"],
             facility_type = facility_type,
+            user_preference = user_preference,
         )
 
         information_quality = calculate_information_quality(
@@ -117,13 +140,16 @@ def evaluate_business_reviews(reviews: list[dict], facility_type: str, agent: Re
                 "weight": weight,
                 "aspects": quality_result.aspects,
                 "quality_reason": quality_result.reason,
+                "preference_relevance": quality_result.preference_relevance,
+                "preference_alignment": quality_result.preference_alignment,
             }
         )
 
     rating_result = calculate_business_rating(scored_reviews)
 
     confidence = calculate_confidence(
-        rating_result["effective_review_count"]
+        rating_result["effective_review_count"],
+        total_reviews = len(scored_reviews),
     )
 
     return {

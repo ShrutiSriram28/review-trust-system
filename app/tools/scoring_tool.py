@@ -67,7 +67,7 @@ def calculate_recency_score(published_at: datetime, current_date: datetime | Non
         current_date = current_date.astimezone(
             timezone.utc
         )
-        
+
     age_days = (current_date - published_at).days
 
     # 6 months
@@ -115,9 +115,12 @@ def calculate_business_rating(reviews: list[dict]) -> dict:
     }
 
 # Confidence based on the number of reviews for a given business
-def calculate_confidence(effective_review_count: float) -> str:
-    if effective_review_count < 3:
+def calculate_confidence(effective_review_count: float, total_reviews: int) -> str:
+    if total_reviews == 0:
         return "Low"
-    if effective_review_count < 10:
+    effective_ratio = effective_review_count / total_reviews
+    if effective_ratio < 0.4:
+        return "Low"
+    if effective_ratio < 0.7:
         return "Medium"
     return "High"

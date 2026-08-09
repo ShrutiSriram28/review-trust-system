@@ -31,6 +31,38 @@ def parse_datetime(value: str | datetime) -> datetime:
 
     return value.astimezone(timezone.utc)
 
+def calculate_preference_match(scored_reviews: list[dict], similarity_by_review_id: dict[int, float]) -> float | None:
+    numerator = 0.0
+    denominator = 0.0
+    total_preference_relevance = 0.0
+
+    for review in scored_reviews:
+        review_id = int(review["id"])
+
+        if review_id not in similarity_by_review_id:
+            continue
+
+        semantic_similarity = max(0.0, float(similarity_by_review_id[review_id]))
+
+        preference_relevance = float(review.get("preference_relevance", 0.0))
+        preference_alignment = float(review.get("preference_alignment", 0.0))
+
+        base_weight = semantic_similarity * float(review["weight"])
+
+        denominator += base_weight
+
+        total_preference_relevance += base_weight * preference_relevance
+
+        numerator += base_weight * preference_relevance * preference_alignment
+
+        if denominator == 0 or total_preference_relevance == 0:
+            return None
+        
+        signed_score = numerator / denominator
+
+        signed_score = max(-1, min(1, signed_score))
+
+        return 0.5 + 0.5 * signed_score
 
 class CoordinatorAgent:
     def __init__(self) -> None:
@@ -38,6 +70,7 @@ class CoordinatorAgent:
         self.summary_agent = SummaryAgent()
 
     def recommend(self, facility_type: str, location: str, description: str | None = None, top_k: int = 5, business_limit: int = 5, review_limit: int  = 5) -> list[dict]:
+        # description = description.strip() if description else None
         businesses = find_businesses.invoke(
             {
                 "facility_type": facility_type,
@@ -155,25 +188,40 @@ class CoordinatorAgent:
         for review in stored_reviews:
             all_reviews_by_business[review["business_id"]].append(review)
 
-        preference_scores: dict[int, float] = {
-            business_id: 0.0
-            for business_id in business_ids
-        }
+        # preference_scores: dict[int, float] = {
+        #     business_id: 0.0
+        #     for business_id in business_ids
+        # }
+
+        # if description:
+        #     relevant_reviews = retrieve_relevant_reviews(
+        #         description=description,
+        #         business_ids=business_ids,
+        #     )
+
+        #     for review in relevant_reviews:
+        #         business_id = review["business_id"]
+        #         similarity = float(review["similarity"])
+
+        #         preference_scores[business_id] = max(
+        #             preference_scores[business_id],
+        #             similarity,
+        #         )
+
+        similarity_by_review_id: dict[int, float] = {}
+        description = description.strip() if description else None
 
         if description:
             relevant_reviews = retrieve_relevant_reviews(
-                description=description,
-                business_ids=business_ids,
+                description = description,
+                business_ids = business_ids,
+                top_k_per_business = review_limit,
             )
 
-            for review in relevant_reviews:
-                business_id = review["business_id"]
-                similarity = float(review["similarity"])
-
-                preference_scores[business_id] = max(
-                    preference_scores[business_id],
-                    similarity,
-                )
+            similarity_by_review_id = {
+                int(review["id"]): float(review["similarity"])
+                for review in relevant_reviews
+            }
 
         results: list[dict] = []
 
@@ -197,21 +245,30 @@ class CoordinatorAgent:
                 reviews=all_business_reviews,
                 facility_type=business["facility_type"],
                 agent=self.review_quality_agent,
+                user_preference = description,
             )
+
+            preference_match_score = None
+
+            if description:
+                preference_match_score = calculate_preference_match(
+                    scored_reviews = scored["reviews"],
+                    similarity_by_review_id = similarity_by_review_id,
+                )
 
             print(f"Finished scoring {business['name']}")
             print(f"Generating summary for {business['name']}")
 
             # The overall summary always uses all scored reviews.
             summary = self.summary_agent.summarize(
-                business_name=business["name"],
-                facility_type=business["facility_type"],
-                weighted_rating=scored["weighted_rating"],
-                effective_review_count=scored[
-                    "effective_review_count"
-                ],
-                confidence=scored["confidence"],
-                scored_reviews=scored["reviews"],
+                business_name = business["name"],
+                facility_type = business["facility_type"],
+                weighted_rating = scored["weighted_rating"],
+                effective_review_count = scored["effective_review_count"],
+                confidence = scored["confidence"],
+                scored_reviews = scored["reviews"],
+                user_preference = description,
+                preference_match_score = preference_match_score,
             )
 
             confidence_statement = (
@@ -240,13 +297,19 @@ class CoordinatorAgent:
                     ),
                     "effective_review_count": round(effective_review_count, 2),
                     "confidence": scored["confidence"],
-                    "preference_match_score": round(preference_scores[business_id], 3),
+                    "preference_match_score": (
+                        round(preference_match_score, 3)
+                        if preference_match_score is not None
+                        else None
+                    ),
                     "summary": summary.summary,
                     "positive_themes": summary.positive_themes,
                     "negative_themes": summary.negative_themes,
                     # "confidence_statement": summary.confidence_statement,
                     "confidence_statement": confidence_statement,
                     "limitations": summary.limitations,
+                    "preference_assessment": summary.preference_assessment,
+                    "preference_conflicts": summary.preference_conflicts,
                 }
             )
 
@@ -256,13 +319,28 @@ class CoordinatorAgent:
             "Low": 1,
         }
 
-        results.sort(
-            key=lambda result: (
-                confidence_rank[result["confidence"]],
-                result["preference_match_score"],
-                result["weighted_rating"] or 0,
-            ),
-            reverse=True,
-        )
+        if description:  
+            results.sort(
+                key=lambda result: (
+                    (
+                        result["preference_match_score"]
+                        if result["preference_match_score"] is not None
+                        else -1.0
+                    ),
+                    confidence_rank[result["confidence"]],
+                    result["weighted_rating"] or 0,
+                    result["effective_review_count"],
+                ),
+                reverse=True,
+            )
+        else:
+            results.sort(
+                key=lambda result: (
+                    confidence_rank[result["confidence"]],
+                    result["weighted_rating"] or 0,
+                    result["effective_review_count"],
+                ),
+                reverse=True,
+            )
 
         return results[:top_k]
