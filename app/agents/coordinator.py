@@ -78,25 +78,36 @@ class CoordinatorAgent:
                 "location": location,
             }
         )
-        businesses = businesses[:business_limit]
 
-        if not businesses:
+        if len(businesses) < business_limit:
             validate_location(location)
+
+            businesses_needed = business_limit - len(businesses)
+            existing_business_names = {
+                business["name"].strip().lower()
+                for business in businesses
+            }
             
             discovered_businesses = search_businesses(
                 facility_type = facility_type,
                 location = location,
-                business_limit = business_limit,
+                business_limit = businesses_needed,
+                excluded_business_names = existing_business_names,
             )
 
-            if not discovered_businesses:
-                return []
+            if discovered_businesses:
+                inserted_businesses = insert_businesses.invoke(
+                    {
+                        "businesses": discovered_businesses,
+                    }
+                )
 
-            businesses = insert_businesses.invoke(
-                {
-                    "businesses": discovered_businesses,
-                }
-            )
+                businesses.extend(inserted_businesses)
+
+        businesses = businesses[:business_limit]
+
+        if not businesses:
+            return []
 
         business_ids = [
             business["id"]
@@ -134,16 +145,24 @@ class CoordinatorAgent:
                 refresh_required = True
                 latest_review_date = None
 
-            if not refresh_required:
+            reviews_needed = max(0, review_limit - len(business_reviews))
+
+            if reviews_needed == 0 and not refresh_required:
                 continue
+
+            existing_review_dates = {
+                parse_datetime(review["published_at"]).isoformat()
+                for review in business_reviews
+            }
 
             new_reviews = search_recent_reviews(
                 business_id = business_id,
                 business_name = business["name"],
                 location = business["location"],
-                published_after = latest_review_date,
-                review_limit = review_limit,
+                published_after = latest_review_date if reviews_needed == 0 else None,
+                review_limit = review_limit if reviews_needed == 0 else reviews_needed,
                 place_id = business.get("place_id"),
+                excluded_published_at = existing_review_dates,
             )
 
             if not new_reviews:
