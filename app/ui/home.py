@@ -3,7 +3,7 @@ import ast
 from nicegui import run, ui
 
 from app.agents.coordinator import CoordinatorAgent
-
+from app.tools.internet_tool import InvalidLocationError
 
 coordinator = CoordinatorAgent()
 
@@ -1383,6 +1383,15 @@ def home_page() -> None:
                             result=result,
                             rank=rank,
                         )
+
+            except InvalidLocationError as error:
+                status_container.clear()
+                status_container.classes(add="hidden")
+                ui.notify(
+                    f"{error}",
+                    type="negative",
+                    close_button=True,
+                )
 
             except Exception as error:
 

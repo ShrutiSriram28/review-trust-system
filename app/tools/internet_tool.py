@@ -11,6 +11,47 @@ if not SERPAPI_API_KEY:
 
 client = serpapi.Client(api_key=SERPAPI_API_KEY)
 
+class InvalidLocationError(ValueError):
+    pass
+
+
+def validate_location(location: str) -> None:
+    """Validate that a location can be found on Google Maps."""
+    try:
+        results = client.search(
+            {
+                "engine": "google_maps",
+                "q": location,
+                "type": "search",
+                "hl": "en",
+            }
+        )
+    except Exception as error:
+        if "hasn't returned any results" in str(error):
+            raise InvalidLocationError(
+                f"'{location}' does not appear to be a valid location. Please enter a valid city, area, or location."
+            ) from error
+
+        raise
+
+    if "error" in results:
+        error_message = str(results["error"])
+
+        if "hasn't returned any results" in error_message:
+            raise InvalidLocationError(
+                f"'{location}' does not appear to be a valid location. Please enter a valid city, area, or location."
+            )
+
+        raise RuntimeError(error_message)
+
+    place_result = results.get("place_results")
+    local_results = results.get("local_results", [])
+
+    if not place_result and not local_results:
+        raise InvalidLocationError(
+            f"'{location}' does not appear to be a valid location. Please enter a valid city, area, or location."
+        )
+
 def _find_place_id(business_name: str, location: str) -> str:
     results = client.search(
         {

@@ -18,6 +18,7 @@ from app.tools.database_tool import (
 from app.tools.internet_tool import (
     search_businesses,
     search_recent_reviews,
+    validate_location,
 )
 from app.tools.scoring_tool import check_freshness
 
@@ -80,6 +81,8 @@ class CoordinatorAgent:
         businesses = businesses[:business_limit]
 
         if not businesses:
+            validate_location(location)
+            
             discovered_businesses = search_businesses(
                 facility_type = facility_type,
                 location = location,
